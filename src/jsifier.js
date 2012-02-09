@@ -1190,6 +1190,7 @@ function JSify(data, functionsOnly, givenFunctions) {
     print(postParts[0]);
 
     // Print out global variables and postsets TODO: batching
+    legalizedI64s = false;
     JSify(analyzer(intertyper(data.unparsedGlobalss[0].lines, true), true), true, Functions);
     data.unparsedGlobalss = null;
 
