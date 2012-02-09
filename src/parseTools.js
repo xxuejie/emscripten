@@ -658,10 +658,11 @@ function parseI64Constant(str) {
 
   if (!isNumber(str)) {
     // This is a variable. Copy it, so we do not modify the original
-    return makeCopyI64(str);
+    return legalizedI64s ? str : makeCopyI64(str);
   }
 
   var parsed = parseArbitraryInt(str, 64);
+  if (legalizedI64s) return parsed;
   return '[' + parsed[0] + ',' + parsed[1] + ']';
 }
 
@@ -1554,7 +1555,7 @@ function processMathop(item) {
     if (item['param'+i]) {
       paramTypes[i-1] = item['param'+i].type || type;
       item['ident'+i] = finalizeLLVMParameter(item['param'+i]);
-      if (!isNumber(item['ident'+i])) {
+      if (!isNumber(item['ident'+i]) && !isNiceIdent(item['ident'+i])) {
         item['ident'+i] = '(' + item['ident'+i] + ')'; // we may have nested expressions. So enforce the order of operations we want
       }
     } else {
