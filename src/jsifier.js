@@ -1050,11 +1050,6 @@ function JSify(data, functionsOnly, givenFunctions) {
     var hasVarArgs = isVarArgsFunctionType(type);
     var normalArgs = (hasVarArgs && !useJSArgs) ? countNormalArgs(type) : -1;
 
-    if (I64_MODE == 1 && ident in LLVM.INTRINSICS_32) {
-      // Some LLVM intrinsics use i64 where it is not needed, and would cause much overhead
-      params.forEach(function(param) { if (param.type == 'i64') param.type = 'i32' });
-    }
-
     params.forEach(function(param, i) {
       var val = finalizeParam(param);
       if (!hasVarArgs || useJSArgs || i < normalArgs) {

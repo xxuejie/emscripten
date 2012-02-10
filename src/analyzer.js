@@ -195,7 +195,7 @@ function analyzer(data, sidePass) {
               // Check if we need to legalize here, and do some trivial legalization along the way
               var isIllegal = false;
               walkInterdata(item, function(item) {
-                if (item.intertype == 'getelementptr') {
+                if (item.intertype == 'getelementptr' || (item.intertype == 'call' && item.ident in LLVM.INTRINSICS_32)) {
                   // Turn i64 args into i32
                   for (var i = 0; i < item.params.length; i++) {
                     if (item.params[i].type == 'i64') item.params[i].type = 'i32';
