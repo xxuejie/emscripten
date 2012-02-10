@@ -192,9 +192,15 @@ function analyzer(data, sidePass) {
             var i = 0, bits;
             while (i < label.lines.length) {
               var item = label.lines[i];
-              // Check if we need to legalize here
+              // Check if we need to legalize here, and do some trivial legalization along the way
               var isIllegal = false;
               walkInterdata(item, function(item) {
+                if (item.intertype == 'getelementptr') {
+                  // Turn i64 args into i32
+                  for (var i = 0; i < item.params.length; i++) {
+                    if (item.params[i].type == 'i64') item.params[i].type = 'i32';
+                  }
+                }
                 if (isIllegalType(item.valueType) || isIllegalType(item.type)) {
                   isIllegal = true;
                 }
