@@ -22,7 +22,7 @@ function cleanFunc(func) {
 
 var BRANCH_INVOKE = set('branch', 'invoke');
 var SIDE_EFFECT_CAUSERS = set('call', 'invoke', 'atomic');
-var UNFOLDABLE = set('value', 'type', 'phiparam');
+var UNUNFOLDABLE = set('value', 'type', 'phiparam');
 
 // Analyzer
 
@@ -127,9 +127,7 @@ function analyzer(data, sidePass) {
           return bits > 0 && (bits >= 64 || !isPowerOfTwo(bits));
         }
         function getLegalVars(base, bits) {
-          if (isNumber(base)) {
-            return getLegalLiterals(base, bits);
-          }
+          assert(!isNumber(base));
           var ret = new Array(Math.ceil(bits/32));
           var i = 0;
           while (bits > 0) {
@@ -213,7 +211,11 @@ function analyzer(data, sidePass) {
               // generated - they may need legalization too
               var unfolded = [];
               walkAndModifyInterdata(item, function(subItem) {
-                if (subItem != item && !(subItem.intertype in UNFOLDABLE)) {
+                // Unfold all non-value interitems that we can, and also unfold all numbers (doing the latter
+                // makes it easier later since we can then assume illegal expressions are always variables
+                // accessible through ident$x, and not constants we need to parse then and there)
+                if (subItem != item && (!(subItem.intertype in UNUNFOLDABLE) ||
+                                       (subItem.intertype == 'value' && isNumber(subItem.ident) && isIllegalType(subItem.type)))) {
                   var tempIdent = '$$emscripten$temp$' + (tempId++);
                   subItem.assignTo = tempIdent;
                   unfolded.unshift(subItem);
@@ -264,6 +266,23 @@ function analyzer(data, sidePass) {
               } else if (item.assignTo) {
                 var value = item;
                 switch (value.intertype) {
+                  case 'value': {
+                    dprint('legalizer', 'Legalizing value at line ' + item.lineNum);
+                    bits = getBits(value.type);
+                    var elements = getLegalVars(item.assignTo, bits);
+                    var values = getLegalLiterals(item.ident, bits);
+                    var j = 0;
+                    var toAdd = elements.map(function(element) {
+                      return {
+                        intertype: 'value',
+                        assignTo: element.ident,
+                        type: 'i' + bits,
+                        ident: values[j++].ident
+                      };
+                    });
+                    i += removeAndAdd(label.lines, i, toAdd);
+                    continue;
+                  }
                   case 'load': {
                     dprint('legalizer', 'Legalizing load at line ' + item.lineNum);
                     bits = getBits(value.valueType);
