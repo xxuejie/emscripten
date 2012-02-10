@@ -167,6 +167,26 @@ function analyzer(data, sidePass) {
           return toAdd.length;
         }
         data.functions.forEach(function(func) {
+          // Legalize function parameters
+          var i = 0;
+          while (i < func.params.length) {
+            var param = func.params[i];
+            if (param.intertype == 'value' && isIllegalType(param.type)) {
+              var toAdd = getLegalVars(param.ident, getBits(param.type)).map(function(element) {
+                return {
+                  intertype: 'value',
+                  type: 'i' + element.bits,
+                  ident: element.ident,
+                  byval: 0
+                };
+              });
+              Array.prototype.splice.apply(func.params, [i, 1].concat(toAdd));
+              i += toAdd.length;
+              continue;
+            }
+            i++;
+          }
+          // Legalize lines in labels
           var tempId = 0;
           func.labels.forEach(function(label) {
             var i = 0, bits;
