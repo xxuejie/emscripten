@@ -260,11 +260,14 @@ process(sys.argv[1])
     if self.library_cache is not None:
       if cache and self.library_cache.get(cache_name):
         print >> sys.stderr,  '<load build from cache> ',
-        bc_file = os.path.join(output_dir, 'lib' + name + '.bc')
-        f = open(bc_file, 'wb')
-        f.write(self.library_cache[cache_name])
-        f.close()
-        return bc_file
+        generated_libs = []
+        for basename, contents in self.library_cache[cache_name]:
+          bc_file = os.path.join(build_dir, basename)
+          f = open(bc_file, 'wb')
+          f.write(contents)
+          f.close()
+          generated_libs.append(bc_file)
+        return generated_libs
 
     print >> sys.stderr, '<building and saving into cache> ',
 
@@ -919,6 +922,46 @@ if 'benchmark' not in str(sys.argv) and 'sanity' not in str(sys.argv):
         '''
         self.do_run(src, '*1 2*')
 
+    def test_multiply_defined_symbols(self):
+      a1 = "int f() { return 1; }"
+      a1_name = os.path.join(self.get_dir(), 'a1.c')
+      open(a1_name, 'w').write(a1)
+      a2 = "void x() {}"
+      a2_name = os.path.join(self.get_dir(), 'a2.c')
+      open(a2_name, 'w').write(a2)
+      b1 = "int f() { return 2; }"
+      b1_name = os.path.join(self.get_dir(), 'b1.c')
+      open(b1_name, 'w').write(b1)
+      b2 = "void y() {}"
+      b2_name = os.path.join(self.get_dir(), 'b2.c')
+      open(b2_name, 'w').write(b2)
+      main = r'''
+        #include <stdio.h>
+        int f();
+        int main() {
+          printf("result: %d\n", f());
+          return 0;
+        }
+      '''
+      main_name = os.path.join(self.get_dir(), 'main.c')
+      open(main_name, 'w').write(main)
+
+      Building.emcc(a1_name)
+      Building.emcc(a2_name)
+      Building.emcc(b1_name)
+      Building.emcc(b2_name)
+      Building.emcc(main_name)
+
+      liba_name = os.path.join(self.get_dir(), 'liba.a')
+      Building.emar('cr', liba_name, [a1_name + '.o', a2_name + '.o'])
+      libb_name = os.path.join(self.get_dir(), 'libb.a')
+      Building.emar('cr', libb_name, [b1_name + '.o', b2_name + '.o'])
+
+      all_name = os.path.join(self.get_dir(), 'all.bc')
+      Building.link([main_name + '.o', liba_name, libb_name], all_name)
+
+      self.do_ll_run(all_name, 'result: 1')
+
     def test_if(self):
         src = '''
           #include <stdio.h>
@@ -1361,6 +1404,46 @@ if 'benchmark' not in str(sys.argv) and 'sanity' not in str(sys.argv):
         
         Settings.DISABLE_EXCEPTION_CATCHING = 0
         self.do_run(src, 'Throw...Construct...Catched...Destruct...Throw...Construct...Copy...Catched...Destruct...Destruct...')
+
+    def test_uncaught_exception(self):
+        if self.emcc_args is None: return self.skip('no libcxx inclusion without emcc')
+
+        Settings.EXCEPTION_DEBUG = 0  # Messes up expected output.
+        Settings.DISABLE_EXCEPTION_CATCHING = 0
+
+        src = r'''
+          #include <stdio.h>
+          #include <exception>
+          struct X {
+            ~X() {
+              printf("exception? %s\n", std::uncaught_exception() ? "yes" : "no");
+            }
+          };
+          int main() {
+            printf("exception? %s\n", std::uncaught_exception() ? "yes" : "no");
+            try {
+              X x;
+              throw 1;
+            } catch(...) {
+              printf("exception? %s\n", std::uncaught_exception() ? "yes" : "no");
+            }
+            printf("exception? %s\n", std::uncaught_exception() ? "yes" : "no");
+            return 0;
+          }
+        '''
+        self.do_run(src, 'exception? no\nexception? yes\nexception? no\nexception? no\n')
+
+        src = r'''
+          #include <fstream>
+          #include <iostream>
+          int main() {
+            std::ofstream os("test");
+            os << std::unitbuf << "foo"; // trigger a call to std::uncaught_exception from
+                                         // std::basic_ostream::sentry::~sentry
+            std::cout << "success";
+          }
+        '''
+        self.do_run(src, 'success')
 
     def test_typed_exceptions(self):
         return self.skip('TODO: fix this for llvm 3.0')
@@ -3767,6 +3850,38 @@ def process(filename):
       '''
       self.do_run(src, "1 2 3")
 
+    def test_readdir(self):
+    
+      add_pre_run = '''
+def process(filename):
+  src = open(filename, 'r').read().replace(
+	'// {{PRE_RUN_ADDITIONS}}',
+	"FS.createFolder('', 'test', true, true);\\nFS.createLazyFile( 'test', 'some_file', 'http://localhost/some_file', true, false);\\nFS.createFolder('test', 'some_directory', true, true);"
+  )
+  open(filename, 'w').write(src)
+        '''
+
+      src = '''
+        #include <dirent.h>
+        #include <stdio.h>
+        
+        int main()
+        {
+            DIR * dir;
+            dirent * entity;
+        
+            dir = opendir( "test" );
+        
+            while( ( entity = readdir( dir ) ) )
+            {
+                printf( "%s is a %s\\n", entity->d_name, entity->d_type & DT_DIR ? "directory" : "file" );
+            }
+        
+            return 0;
+        }
+
+      '''
+      self.do_run(src, ". is a directory\n.. is a directory\nsome_file is a file\nsome_directory is a directory", post_build=add_pre_run)
 
     def test_fs_base(self):
       Settings.INCLUDE_FULL_LIBRARY = 1
@@ -4295,7 +4410,10 @@ def process(filename):
         del os.environ['EMCC_LEAVE_INPUTS_RAW']
 
     def get_build_dir(self):
-      return os.path.join(self.get_dir(), 'building')
+      ret = os.path.join(self.get_dir(), 'building')
+      if not os.path.exists(ret):
+        os.makedirs(ret)
+      return ret
 
     def get_freetype(self):
       Settings.INIT_STACK = 1 # TODO: Investigate why this is necessary
@@ -4323,7 +4441,7 @@ def process(filename):
       self.do_run(open(path_from_root('tests', 'freetype', 'main.c'), 'r').read(),
                    open(path_from_root('tests', 'freetype', 'ref.txt'), 'r').read(),
                    ['font.ttf', 'test!', '150', '120', '25'],
-                   libraries=[self.get_freetype()],
+                   libraries=self.get_freetype(),
                    includes=[path_from_root('tests', 'freetype', 'include')],
                    post_build=post)
                    #build_ll_hook=self.do_autodebug)
@@ -4364,7 +4482,7 @@ def process(filename):
 
       self.do_run(open(path_from_root('tests', 'zlib', 'example.c'), 'r').read(),
                    open(path_from_root('tests', 'zlib', 'ref.txt'), 'r').read(),
-                   libraries=[self.get_library('zlib', os.path.join('libz.a'), make_args=['libz.a'])],
+                   libraries=self.get_library('zlib', os.path.join('libz.a'), make_args=['libz.a']),
                    includes=[path_from_root('tests', 'zlib')],
                    force_c=True)
 
@@ -4381,10 +4499,10 @@ def process(filename):
       self.do_run(open(path_from_root('tests', 'bullet', 'Demos', 'HelloWorld', 'HelloWorld.cpp'), 'r').read(),
                    [open(path_from_root('tests', 'bullet', 'output.txt'), 'r').read(), # different roundings
                     open(path_from_root('tests', 'bullet', 'output2.txt'), 'r').read()],
-                   libraries=[self.get_library('bullet', [os.path.join('src', '.libs', 'libBulletCollision.a'),
-                                                          os.path.join('src', '.libs', 'libBulletDynamics.a'),
+                   libraries=self.get_library('bullet', [os.path.join('src', '.libs', 'libBulletDynamics.a'),
+                                                          os.path.join('src', '.libs', 'libBulletCollision.a'),
                                                           os.path.join('src', '.libs', 'libLinearMath.a')],
-                                               configure_args=['--disable-demos','--disable-dependency-tracking'])],
+                                               configure_args=['--disable-demos','--disable-dependency-tracking']),
                    includes=[path_from_root('tests', 'bullet', 'src')],
                    js_engines=[SPIDERMONKEY_ENGINE]) # V8 issue 1407
 
@@ -4425,15 +4543,15 @@ def process(filename):
       freetype = self.get_freetype()
 
       poppler = self.get_library('poppler',
-                                 [os.path.join('poppler', '.libs', self.get_shared_library_name('libpoppler.so.13')),
-                                  os.path.join('utils', 'pdftoppm.o'),
-                                  os.path.join('utils', 'parseargs.o')],
-                                 configure_args=['--disable-libjpeg', '--disable-libpng', '--disable-poppler-qt', '--disable-poppler-qt4', '--disable-cms'])
+                                 [os.path.join('utils', 'pdftoppm.o'),
+                                  os.path.join('utils', 'parseargs.o'),
+                                  os.path.join('poppler', '.libs', 'libpoppler.a')],
+                                 configure_args=['--disable-libjpeg', '--disable-libpng', '--disable-poppler-qt', '--disable-poppler-qt4', '--disable-cms', '--disable-cairo-output', '--disable-abiword-output', '--enable-shared=no'])
 
       # Combine libraries
 
       combined = os.path.join(self.get_dir(), 'poppler-combined.bc')
-      Building.link([freetype, poppler], combined)
+      Building.link(poppler + freetype, combined)
 
       self.do_ll_run(combined,
                      map(ord, open(path_from_root('tests', 'poppler', 'ref.ppm'), 'r').read()).__str__().replace(' ', ''),
@@ -4467,11 +4585,11 @@ def process(filename):
       shutil.copy(path_from_root('tests', 'openjpeg', 'opj_config.h'), self.get_dir())
 
       lib = self.get_library('openjpeg',
-                             [os.path.join('bin', self.get_shared_library_name('libopenjpeg.so.1.4.0')),
-                              os.path.sep.join('codec/CMakeFiles/j2k_to_image.dir/index.c.o'.split('/')),
+                             [os.path.sep.join('codec/CMakeFiles/j2k_to_image.dir/index.c.o'.split('/')),
                               os.path.sep.join('codec/CMakeFiles/j2k_to_image.dir/convert.c.o'.split('/')),
                               os.path.sep.join('codec/CMakeFiles/j2k_to_image.dir/__/common/color.c.o'.split('/')),
-                              os.path.sep.join('codec/CMakeFiles/j2k_to_image.dir/__/common/getopt.c.o'.split('/'))],
+                              os.path.sep.join('codec/CMakeFiles/j2k_to_image.dir/__/common/getopt.c.o'.split('/')),
+                              os.path.join('bin', self.get_shared_library_name('libopenjpeg.so.1.4.0'))],
                              configure=['cmake', '.'],
                              #configure_args=['--enable-tiff=no', '--enable-jp3d=no', '--enable-png=no'],
                              make_args=[]) # no -j 2, since parallel builds can fail
@@ -4515,7 +4633,7 @@ def process(filename):
       self.do_run(open(path_from_root('tests', 'openjpeg', 'codec', 'j2k_to_image.c'), 'r').read(),
                    'Successfully generated', # The real test for valid output is in image_compare
                    '-i image.j2k -o image.raw'.split(' '),
-                   libraries=[lib],
+                   libraries=lib,
                    includes=[path_from_root('tests', 'openjpeg', 'libopenjpeg'),
                              path_from_root('tests', 'openjpeg', 'codec'),
                              path_from_root('tests', 'openjpeg', 'common'),
@@ -5594,9 +5712,9 @@ Options that are modified or new in %s include:
             # XXX find a way to test this: assert ('& 255' in generated or '&255' in generated) == (opt_level <= 2), 'corrections should be in opt <= 2'
             assert ('(__label__)' in generated) == (opt_level <= 1), 'relooping should be in opt >= 2'
             assert ('assert(STACKTOP < STACK_MAX' in generated) == (opt_level == 0), 'assertions should be in opt == 0'
-            assert 'var $i;' in generated or 'var $storemerge3;' in generated or 'var $storemerge4;' in generated or 'var $i_04;' in generated, 'micro opts should always be on'
+            assert 'var $i;' in generated or 'var $i_01;' in generated or 'var $storemerge3;' in generated or 'var $storemerge4;' in generated or 'var $i_04;' in generated, 'micro opts should always be on'
             if opt_level >= 1:
-              assert 'HEAP8[HEAP32[' in generated or 'HEAP8[$vla1 + $storemerge4 / 2 | 0]' in generated or 'HEAP8[$vla1 + ($storemerge4 / 2 | 0)]' in generated or 'HEAP8[$vla1 + $i_04 / 2 | 0]' in generated or 'HEAP8[$vla1 + ($i_04 / 2 | 0)]' in generated, 'eliminator should create compound expressions, and fewer one-time vars'
+              assert 'HEAP8[HEAP32[' in generated or 'HEAP8[$vla1 + $storemerge4 / 2 | 0]' in generated or 'HEAP8[$vla1 + ($storemerge4 / 2 | 0)]' in generated or 'HEAP8[$vla1 + $i_04 / 2 | 0]' in generated or 'HEAP8[$vla1 + ($i_04 / 2 | 0)]' in generated or 'HEAP8[$1 + $i_01 / 2 | 0]' in generated or 'HEAP8[$1 + ($i_01 / 2 | 0)]' in generated, 'eliminator should create compound expressions, and fewer one-time vars'
             assert ('_puts(' in generated) == (opt_level >= 1), 'with opt >= 1, llvm opts are run and they should optimize printf to puts'
             assert ('function _malloc(bytes) {' in generated) == (not has_malloc), 'If malloc is needed, it should be there, if not not'
             assert 'function _main() {' in generated, 'Should be unminified, including whitespace'
