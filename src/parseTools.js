@@ -1597,7 +1597,7 @@ function processMathop(item) {
       // If this is in legalization mode, steal the assign and assign into two vars
       if (legalizedI64s) {
         assert(item.assignTo);
-        var ret = item.assignTo + '$0 = ' + result[0] + '; ' + item.assignTo + '$1 = ' + result[1] + ';';
+        var ret = 'var ' + item.assignTo + '$0 = ' + result[0] + '; var ' + item.assignTo + '$1 = ' + result[1] + ';';
         item.assignTo = null;
         return ret;
       } else {
