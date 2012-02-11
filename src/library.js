@@ -3479,7 +3479,7 @@ LibraryManager.library = {
 
 #if I64_MODE == 1
     if (bits == 64) {
-      ret = {{{ splitI64('ret') }}};
+      ret = [{{{ splitI64('ret') }}}];
     }
 #endif
 
