@@ -1,5 +1,5 @@
 // -*- C++ -*-
-//===-------------------------- cassert -----------------------------------===//
+//===----------------------------------------------------------------------===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -8,18 +8,12 @@
 //
 //===----------------------------------------------------------------------===//
 
-/*
-    cassert synopsis
+#ifdef min
+#warning: macro min is incompatible with C++.  #undef'ing min
+#undef min
+#endif
 
-Macros:
-
-    assert
-
-*/
-
-#include <__config>
-#include <assert.h>
-
-#if !defined(_LIBCPP_HAS_NO_PRAGMA_SYSTEM_HEADER)
-#pragma GCC system_header
+#ifdef max
+#warning: macro max is incompatible with C++.  #undef'ing max
+#undef max
 #endif
