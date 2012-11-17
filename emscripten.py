@@ -53,7 +53,7 @@ def minify(ll):
   minify_counter = 0
   minify_cache = {}
   def minrep(text):
-    if re.match(r'^%\d+$', text): return text
+    if re.match(r'^\d+$', text): return text
     global minify_counter
     global minify_cache
     if text in minify_cache:
@@ -62,7 +62,7 @@ def minify(ll):
     ret = '%' + 'M' + hex(minify_counter)[2:]
     minify_cache[text] = ret
     return ret
-  ll = re.sub(r'(?<!(label ))(?<!%)%([\w\d_.])+', lambda m: minrep(m.group(0)), ll)
+  ll = re.sub(r'(?<!(label ))(?<!%)(?:%)([\w\d_.])+', lambda m: minrep(m.group(0)), ll)
 
   def restore_strings(text):
     return text.replace('%%', '%')
