@@ -59,10 +59,11 @@ def minify(ll):
     if text in minify_cache:
       return minify_cache[text]
     minify_counter += 1
-    ret = '%' + 'M' + hex(minify_counter)[2:]
+    ret = 'M' + hex(minify_counter)[2:]
     minify_cache[text] = ret
     return ret
-  ll = re.sub(r'(?<!(label ))(?<!%)(?:%)([\w\d_.])+', lambda m: minrep(m.group(0)), ll)
+  ll = re.sub(r'(?<!%%)(?<=%)([\w\d_.])+', lambda m: minrep(m.group(0)), ll)
+  ll = re.sub(r'(?<=\n)([\w\d])+(?=\:)', lambda m: minrep(m.group(0)), ll)
 
   def restore_strings(text):
     return text.replace('%%', '%')
