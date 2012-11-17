@@ -291,6 +291,8 @@ var HEADLESS = 0; // If 1, will include shim code that tries to 'fake' a browser
 
 var NECESSARY_BLOCKADDRS = []; // List of (function, block) for all block addresses that are taken.
 
+var MINIFY = 0; // Rename variables to reduce code size
+
 // Compiler debugging options
 var DEBUG_TAGS_SHOWING = [];
   // Some useful items:

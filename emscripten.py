@@ -21,6 +21,7 @@ WARNING: You should normally never use this! Use emcc instead.
 from tools import shared
 
 DEBUG = os.environ.get('EMCC_DEBUG')
+DEBUG_SAVE = os.environ.get('EMCC_DEBUG_SAVE')
 
 __rootpath__ = os.path.abspath(os.path.dirname(__file__))
 def path_from_root(*pathelems):
@@ -42,6 +43,32 @@ def scan(ll, settings):
   if len(blockaddrs) > 0:
     settings['NECESSARY_BLOCKADDRS'] = blockaddrs
 
+def minify(ll):
+  def protect_strings(text):
+    return text.replace('%', '%%')
+  ll = re.sub(r'(?<=x i8\] c")(.*)(?=", align)', lambda m: protect_strings(m.group(1)), ll)
+
+  global minify_counter
+  global minify_cache
+  minify_counter = 0
+  minify_cache = {}
+  def minrep(text):
+    if re.match(r'^%\d+$', text): return text
+    global minify_counter
+    global minify_cache
+    if text in minify_cache:
+      return minify_cache[text]
+    minify_counter += 1
+    ret = '%' + 'M' + hex(minify_counter)[2:]
+    minify_cache[text] = ret
+    return ret
+  ll = re.sub(r'(?<!(label ))(?<!%)%([\w\d_.])+', lambda m: minrep(m.group(0)), ll)
+
+  def restore_strings(text):
+    return text.replace('%%', '%')
+  ll = re.sub(r'(?<=x i8\] c")(.*)(?=", align)', lambda m: restore_strings(m.group(1)), ll)
+  return ll
+
 NUM_CHUNKS_PER_CORE = 5
 MIN_CHUNK_SIZE = 1024*1024
 MAX_CHUNK_SIZE = float(os.environ.get('EMSCRIPT_MAX_CHUNK_SIZE') or 'inf') # configuring this is just for debugging purposes
@@ -51,7 +78,7 @@ def process_funcs(args):
   funcs_file = temp_files.get('.func_%d.ll' % i).name
   open(funcs_file, 'w').write(ll)
   out = shared.run_js(compiler, compiler_engine, [settings_file, funcs_file, 'funcs', forwarded_file] + libraries, stdout=subprocess.PIPE, cwd=path_from_root('src'))
-  shared.try_delete(funcs_file)
+  if not DEBUG_SAVE: shared.try_delete(funcs_file)
   return out.split('//FORWARDED_DATA:')
 
 def emscript(infile, settings, outfile, libraries=[]):
@@ -73,12 +100,22 @@ def emscript(infile, settings, outfile, libraries=[]):
 
   if DEBUG: print >> sys.stderr, 'emscript: ll=>js'
 
+  ll = open(infile).read()
+
+  # Minify, if asked to
+  if settings['MINIFY']:
+    if DEBUG: t = time.time()
+    ll = minify(ll)
+    if DEBUG:
+      print >> sys.stderr, '  emscript: minify took %s seconds' % (time.time() - t)
+      open(os.path.join(shared.EMSCRIPTEN_TEMP_DIR, 'min.ll'), 'w').write(ll)
+    #print >> sys.stderr, ll
+    #1/0.
+
   # Pre-scan ll and alter settings as necessary
   if DEBUG: t = time.time()
-  ll = open(infile).read()
   scan(ll, settings)
   total_ll_size = len(ll)
-  ll = None # allow collection
   if DEBUG: print >> sys.stderr, '  emscript: scan took %s seconds' % (time.time() - t)
 
   # Split input into the relevant parts for each phase
@@ -88,13 +125,13 @@ def emscript(infile, settings, outfile, libraries=[]):
 
   if DEBUG: t = time.time()
   in_func = False
-  ll_lines = open(infile).readlines()
+  ll_lines = ll.split('\n')
   for line in ll_lines:
     if in_func:
       funcs[-1].append(line)
       if line.startswith('}'):
         in_func = False
-        funcs[-1] = ''.join(funcs[-1])
+        funcs[-1] = '\n'.join(funcs[-1]) + '\n'
         pre.append(line) # pre needs it to, so we know about all implemented functions
     else:
       if line.startswith('define '):
@@ -108,7 +145,7 @@ def emscript(infile, settings, outfile, libraries=[]):
       else:
         pre.append(line) # pre needs it so we know about globals in pre and funcs. So emit globals there
   ll_lines = None
-  meta = ''.join(meta)
+  meta = '\n'.join(meta)
   if DEBUG and len(meta) > 1024*1024: print >> sys.stderr, 'emscript warning: large amounts of metadata, will slow things down'
   if DEBUG: print >> sys.stderr, '  emscript: split took %s seconds' % (time.time() - t)
 
@@ -129,7 +166,7 @@ def emscript(infile, settings, outfile, libraries=[]):
   # Phase 1 - pre
   if DEBUG: t = time.time()
   pre_file = temp_files.get('.pre.ll').name
-  open(pre_file, 'w').write(''.join(pre) + '\n' + meta)
+  open(pre_file, 'w').write('\n'.join(pre) + '\n' + meta)
   out = shared.run_js(compiler, shared.COMPILER_ENGINE, [settings_file, pre_file, 'pre'] + libraries, stdout=subprocess.PIPE, cwd=path_from_root('src'))
   pre, forwarded_data = out.split('//FORWARDED_DATA:')
   forwarded_file = temp_files.get('.json').name
