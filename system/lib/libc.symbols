@@ -48,3 +48,4 @@ _ZNSt20bad_array_new_lengthC2Ev
 _ZNSt20bad_array_new_lengthD0Ev
 _ZNSt20bad_array_new_lengthD1Ev
 _ZNSt20bad_array_new_lengthD2Ev
+strtod
